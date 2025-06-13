@@ -24,12 +24,10 @@ logger = logging.getLogger(__name__)
 class DeviceInfo:
     address: str
     name: str
-    device_type: str
     last_seen: str
     connected: bool = False
     rssi: Optional[int] = None
     connection_attempts: int = 0
-    last_data: Optional[Dict] = None
 
 @dataclass
 class LogEntry:
@@ -40,35 +38,33 @@ class LogEntry:
 
 class BluetoothWebManager:
     def __init__(self):
-        self.connected_devices: Dict[str, DeviceInfo] = {}
+        # ARRAY DE ENDEREÇOS MAC VÁLIDOS - MODIFIQUE AQUI
+        self.valid_mac_addresses = [
+            "AA:BB:CC:DD:EE:FF",  # Exemplo 1
+            "11:22:33:44:55:66",  # Exemplo 2
+            "77:88:99:AA:BB:CC",  # Exemplo 3
+            "2A328859-8CB4-994A-F780-440D72EF1A0E",
+        ]
+        
+        self.detected_devices: Dict[str, DeviceInfo] = {}  # Apenas dispositivos válidos detectados
         self.device_data: Dict[str, Dict] = {}
         self.is_scanning = False
         self.is_connecting = False
         self.socket_server = None
         self.clients = []
         self.logs: List[LogEntry] = []
-        self.scan_task = None
-        self.data_update_task = None
-        self.socketio = None  # Inicializar como None
+        self.socketio = None
         
         # Configurações padrão
         self.config = {
             'socket_port': 8888,
             'web_port': 5001,
-            'web_endpoint': 'http://localhost:5001/api/bluetooth-data',
             'scan_interval': 5,
             'data_update_interval': 2,
             'connection_timeout': 10,
             'max_connection_attempts': 3,
-            'auto_reconnect': True,
-            'known_devices': {
-                'bastao': ['Bastão', 'Stick', 'Rod', 'RFID', 'bastao'],
-                'balanca': ['Balança', 'Scale', 'Weight', 'Peso', 'balanca'],
-                'termometro': ['Temp', 'Temperature', 'Termometro', 'Termo']
-            }
         }
         
-        # Primeiro configurar Flask e socketio, depois carregar configurações
         self.setup_flask()
         self.load_config()
         
@@ -77,6 +73,9 @@ class BluetoothWebManager:
             with open('bluetooth_config.json', 'r') as f:
                 loaded_config = json.load(f)
                 self.config.update(loaded_config)
+                # Carregar lista de MACs válidos se existir no arquivo
+                if 'valid_mac_addresses' in loaded_config:
+                    self.valid_mac_addresses = loaded_config['valid_mac_addresses']
                 self.log_message("Configurações carregadas com sucesso", "INFO")
         except FileNotFoundError:
             self.save_config()
@@ -86,14 +85,18 @@ class BluetoothWebManager:
             
     def save_config(self):
         try:
+            # Salvar configurações incluindo a lista de MACs válidos
+            config_to_save = self.config.copy()
+            config_to_save['valid_mac_addresses'] = self.valid_mac_addresses
+            
             with open('bluetooth_config.json', 'w') as f:
-                json.dump(self.config, f, indent=2, ensure_ascii=False)
+                json.dump(config_to_save, f, indent=2, ensure_ascii=False)
         except Exception as e:
             self.log_message(f"Erro ao salvar configurações: {e}", "ERROR")
             
     def setup_flask(self):
         self.app = Flask(__name__)
-        self.app.config['SECRET_KEY'] = 'bluetooth_animal_management_2024'
+        self.app.config['SECRET_KEY'] = 'bluetooth_whitelist_2024'
         self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
         
         # Rotas da interface web
@@ -106,7 +109,8 @@ class BluetoothWebManager:
             return jsonify({
                 'is_scanning': self.is_scanning,
                 'is_connecting': self.is_connecting,
-                'connected_devices': {addr: asdict(device) for addr, device in self.connected_devices.items()},
+                'valid_mac_addresses': self.valid_mac_addresses,
+                'detected_devices': {addr: asdict(device) for addr, device in self.detected_devices.items()},
                 'device_data': self.device_data,
                 'logs': [asdict(log) for log in self.logs[-100:]],
                 'stats': self.get_system_stats()
@@ -128,10 +132,12 @@ class BluetoothWebManager:
             
         @self.app.route('/api/connect_device/<device_address>', methods=['POST'])
         def api_connect_device(device_address):
-            success = self.connect_single_device(device_address)
-            if success:
-                return jsonify({'success': True, 'message': f'Conectando dispositivo {device_address}'})
-            return jsonify({'success': False, 'message': 'Erro ao conectar dispositivo'})
+            if device_address in self.valid_mac_addresses:
+                success = self.connect_single_device(device_address)
+                if success:
+                    return jsonify({'success': True, 'message': f'Conectando dispositivo {device_address}'})
+                return jsonify({'success': False, 'message': 'Erro ao conectar dispositivo'})
+            return jsonify({'success': False, 'message': 'Dispositivo não autorizado'})
             
         @self.app.route('/api/disconnect_device/<device_address>', methods=['POST'])
         def api_disconnect_device(device_address):
@@ -141,7 +147,7 @@ class BluetoothWebManager:
         @self.app.route('/api/connect_all', methods=['POST'])
         def api_connect_all():
             self.connect_all_devices()
-            return jsonify({'success': True, 'message': 'Conectando todos os dispositivos'})
+            return jsonify({'success': True, 'message': 'Conectando todos os dispositivos válidos'})
             
         @self.app.route('/api/disconnect_all', methods=['POST'])
         def api_disconnect_all():
@@ -154,15 +160,15 @@ class BluetoothWebManager:
             self.log_message("Logs limpos", "INFO")
             return jsonify({'success': True, 'message': 'Logs limpos'})
             
-        @self.app.route('/api/config', methods=['GET', 'POST'])
-        def api_config():
-            if request.method == 'POST':
-                data = request.json
-                self.config.update(data)
+        @self.app.route('/api/update_valid_macs', methods=['POST'])
+        def api_update_valid_macs():
+            data = request.json
+            if 'mac_addresses' in data and isinstance(data['mac_addresses'], list):
+                self.valid_mac_addresses = data['mac_addresses']
                 self.save_config()
-                self.log_message("Configurações atualizadas", "INFO")
-                return jsonify({'success': True, 'message': 'Configurações salvas'})
-            return jsonify(self.config)
+                self.log_message(f"Lista de MACs válidos atualizada: {len(self.valid_mac_addresses)} endereços", "INFO")
+                return jsonify({'success': True, 'message': 'Lista de MACs válidos atualizada'})
+            return jsonify({'success': False, 'message': 'Formato inválido'})
             
         # Socket events
         @self.socketio.on('connect')
@@ -171,7 +177,8 @@ class BluetoothWebManager:
             emit('initial_data', {
                 'is_scanning': self.is_scanning,
                 'is_connecting': self.is_connecting,
-                'connected_devices': {addr: asdict(device) for addr, device in self.connected_devices.items()},
+                'valid_mac_addresses': self.valid_mac_addresses,
+                'detected_devices': {addr: asdict(device) for addr, device in self.detected_devices.items()},
                 'device_data': self.device_data,
                 'logs': [asdict(log) for log in self.logs[-50:]],
                 'stats': self.get_system_stats()
@@ -184,7 +191,7 @@ class BluetoothWebManager:
         @self.socketio.on('request_device_data')
         def handle_request_data(data):
             device_address = data.get('device_address')
-            if device_address in self.connected_devices:
+            if device_address in self.detected_devices:
                 self.request_device_data(device_address)
                 
     def log_message(self, message, level="INFO", device_address=None):
@@ -210,7 +217,7 @@ class BluetoothWebManager:
         else:
             logger.info(message)
         
-        # Enviar para interface web em tempo real (só se socketio estiver disponível)
+        # Enviar para interface web em tempo real
         if self.socketio:
             try:
                 self.socketio.emit('log_update', asdict(log_entry))
@@ -219,178 +226,67 @@ class BluetoothWebManager:
         
     def get_system_stats(self):
         now = datetime.now()
-        connected_count = sum(1 for device in self.connected_devices.values() if device.connected)
+        connected_count = sum(1 for device in self.detected_devices.values() if device.connected)
         recent_logs = len([log for log in self.logs if 
                           datetime.strptime(log.timestamp, "%H:%M:%S").replace(
                               year=now.year, month=now.month, day=now.day
                           ) > now - timedelta(minutes=5)])
         
         return {
-            'total_devices': len(self.connected_devices),
+            'valid_addresses_count': len(self.valid_mac_addresses),
+            'detected_devices': len(self.detected_devices),
             'connected_devices': connected_count,
             'recent_logs': recent_logs,
             'uptime': str(now - getattr(self, 'start_time', now)),
-            'data_points': len(self.device_data)
         }
-        
-    def start_socket_server(self):
-        def run_server():
-            try:
-                self.socket_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.socket_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                self.socket_server.bind(('localhost', self.config['socket_port']))
-                self.socket_server.listen(5)
-                self.log_message(f"Servidor socket iniciado na porta {self.config['socket_port']}")
-                
-                while True:
-                    try:
-                        client_socket, addr = self.socket_server.accept()
-                        self.clients.append(client_socket)
-                        self.log_message(f"Cliente socket conectado: {addr}")
-                        
-                        client_thread = threading.Thread(target=self.handle_socket_client, args=(client_socket,))
-                        client_thread.daemon = True
-                        client_thread.start()
-                        
-                    except Exception as e:
-                        if self.socket_server:
-                            self.log_message(f"Erro no servidor socket: {e}", "ERROR")
-                        break
-                        
-            except Exception as e:
-                self.log_message(f"Erro ao iniciar servidor socket: {e}", "ERROR")
-                
-        server_thread = threading.Thread(target=run_server)
-        server_thread.daemon = True
-        server_thread.start()
-        
-    def handle_socket_client(self, client_socket):
-        try:
-            while True:
-                data = {
-                    'timestamp': datetime.now().isoformat(),
-                    'devices': self.device_data,
-                    'connected_devices': {addr: asdict(device) for addr, device in self.connected_devices.items()},
-                    'stats': self.get_system_stats()
-                }
-                message = json.dumps(data, ensure_ascii=False) + '\n'
-                client_socket.send(message.encode('utf-8'))
-                time.sleep(self.config['data_update_interval'])
-        except Exception as e:
-            self.log_message(f"Erro com cliente socket: {e}", "WARNING")
-        finally:
-            if client_socket in self.clients:
-                self.clients.remove(client_socket)
-            try:
-                client_socket.close()
-            except:
-                pass
-            
-    def broadcast_data(self, data):
-        # Enviar via socket
-        message = json.dumps(data, ensure_ascii=False) + '\n'
-        disconnected_clients = []
-        
-        for client in self.clients:
-            try:
-                client.send(message.encode('utf-8'))
-            except:
-                disconnected_clients.append(client)
-                
-        for client in disconnected_clients:
-            self.clients.remove(client)
-            
-        # Enviar via web socket (só se socketio estiver disponível)
-        if self.socketio:
-            try:
-                self.socketio.emit('device_data_update', data)
-            except Exception as e:
-                logger.error(f"Erro ao enviar dados via socketio: {e}")
-        
-    def check_internet_connection(self):
-        try:
-            requests.get("http://www.google.com", timeout=3)
-            return True
-        except:
-            return False
-            
-    def send_data_to_web(self, data):
-        if self.check_internet_connection():
-            try:
-                response = requests.post(self.config['web_endpoint'], json=data, timeout=10)
-                if response.status_code == 200:
-                    self.log_message("Dados enviados para o site com sucesso")
-                    return True
-                else:
-                    self.log_message(f"Erro ao enviar dados para o site: {response.status_code}", "WARNING")
-            except Exception as e:
-                self.log_message(f"Erro ao conectar com o site: {e}", "WARNING")
-        
-        # Sempre enviar localmente
-        self.broadcast_data(data)
-        return False
-        
-    def get_device_type(self, device_name):
-        if not device_name:
-            return 'desconhecido'
-            
-        device_name_lower = device_name.lower()
-        
-        for device_type, keywords in self.config['known_devices'].items():
-            for keyword in keywords:
-                if keyword.lower() in device_name_lower:
-                    return device_type
-                    
-        return 'desconhecido'
         
     async def scan_devices(self):
         while self.is_scanning:
             try:
-                self.log_message("🔍 Escaneando dispositivos Bluetooth...")
+                self.log_message("🔍 Escaneando dispositivos Bluetooth válidos...")
                 
-                # Scanner com timeout menor para mais responsividade
+                # Scanner com timeout
                 devices = await BleakScanner.discover(timeout=8.0, return_adv=True)
                 
                 current_time = datetime.now()
-                found_devices = []
+                found_valid_devices = []
                 new_devices = 0
                 
                 for device_address, (device, adv_data) in devices.items():
-                    if device.name:
-                        device_type = self.get_device_type(device.name)
-                        
-                        is_new_device = device_address not in self.connected_devices
+                    # FILTRAR: Só processar se o endereço MAC está na lista válida
+                    if device_address in self.valid_mac_addresses:
+                        is_new_device = device_address not in self.detected_devices
                         
                         device_info = DeviceInfo(
                             address=device_address,
-                            name=device.name,
-                            device_type=device_type,
+                            name=device.name or f"Dispositivo {device_address[-5:]}",
                             last_seen=current_time.isoformat(),
                             connected=False,
                             rssi=getattr(adv_data, 'rssi', None)
                         )
                         
-                        found_devices.append(device_info)
+                        found_valid_devices.append(device_info)
                         
                         if is_new_device:
-                            self.connected_devices[device_address] = device_info
+                            self.detected_devices[device_address] = device_info
                             new_devices += 1
-                            self.log_message(f"📱 Novo dispositivo: {device.name} ({device_type}) - RSSI: {device_info.rssi}")
+                            self.log_message(f"✅ Dispositivo válido detectado: {device_address} ({device.name}) - RSSI: {device_info.rssi}")
                         else:
                             # Atualizar informações do dispositivo existente
-                            existing_device = self.connected_devices[device_address]
+                            existing_device = self.detected_devices[device_address]
                             existing_device.last_seen = current_time.isoformat()
                             existing_device.rssi = device_info.rssi
+                            existing_device.name = device_info.name
                 
                 if new_devices > 0:
-                    self.log_message(f"✨ {new_devices} novos dispositivos encontrados")
+                    self.log_message(f"🎯 {new_devices} novos dispositivos válidos encontrados")
                 
                 # Enviar atualizações para interface web
                 if self.socketio:
                     try:
                         self.socketio.emit('devices_update', {
-                            'connected_devices': {addr: asdict(device) for addr, device in self.connected_devices.items()},
-                            'found_devices': [asdict(device) for device in found_devices],
+                            'detected_devices': {addr: asdict(device) for addr, device in self.detected_devices.items()},
+                            'found_devices': [asdict(device) for device in found_valid_devices],
                             'stats': self.get_system_stats()
                         })
                     except Exception as e:
@@ -406,6 +302,7 @@ class BluetoothWebManager:
         if not self.is_scanning:
             self.is_scanning = True
             self.log_message("🚀 Escaneamento Bluetooth iniciado")
+            self.log_message(f"🎯 Procurando por {len(self.valid_mac_addresses)} dispositivos válidos...")
             
             def run_scan():
                 loop = asyncio.new_event_loop()
@@ -420,9 +317,6 @@ class BluetoothWebManager:
             scan_thread = threading.Thread(target=run_scan)
             scan_thread.daemon = True
             scan_thread.start()
-            
-            # Iniciar atualização automática de dados
-            self.start_data_updates()
             
             if self.socketio:
                 try:
@@ -439,104 +333,12 @@ class BluetoothWebManager:
             except Exception as e:
                 logger.error(f"Erro ao emitir status de escaneamento: {e}")
         
-    def start_data_updates(self):
-        """Inicia thread para atualização automática de dados dos dispositivos"""
-        def update_loop():
-            while self.is_scanning:
-                try:
-                    for device_address, device in self.connected_devices.items():
-                        if device.connected:
-                            # Simular atualização de dados
-                            self.simulate_device_data(device_address)
-                    
-                    time.sleep(self.config['data_update_interval'])
-                except Exception as e:
-                    self.log_message(f"Erro na atualização de dados: {e}", "ERROR")
-                    time.sleep(5)
-        
-        update_thread = threading.Thread(target=update_loop)
-        update_thread.daemon = True
-        update_thread.start()
-        
-    def simulate_device_data(self, device_address):
-        """Simula dados dos dispositivos para demonstração"""
-        device_info = self.connected_devices.get(device_address)
-        if not device_info:
-            return
-            
-        try:
-            current_time = datetime.now()
-            
-            if device_info.device_type == 'balanca':
-                # Simular variação realista de peso
-                base_weight = 450
-                variation = random.uniform(-10, 10)
-                weight = round(base_weight + variation, 1)
-                processed_data = {
-                    'peso': weight,
-                    'unidade': 'kg',
-                    'estabilidade': random.choice(['estavel', 'oscilando']),
-                    'bateria': random.randint(60, 100)
-                }
-            elif device_info.device_type == 'bastao':
-                # Simular leitura de RFID
-                if random.random() < 0.3:  # 30% chance de ler um novo animal
-                    animal_ids = ['RF001', 'RF002', 'RF003', 'RF004', 'RF005']
-                    animal_id = random.choice(animal_ids)
-                    processed_data = {
-                        'animal_id': animal_id,
-                        'tipo': 'identificacao',
-                        'signal_strength': random.randint(70, 100),
-                        'bateria': random.randint(80, 100)
-                    }
-                else:
-                    return  # Não há nova leitura
-            elif device_info.device_type == 'termometro':
-                # Simular temperatura corporal
-                temp = round(random.uniform(37.5, 39.2), 1)
-                processed_data = {
-                    'temperatura': temp,
-                    'unidade': '°C',
-                    'status': 'normal' if 37.8 <= temp <= 38.8 else 'alerta',
-                    'bateria': random.randint(50, 100)
-                }
-            else:
-                processed_data = {
-                    'status': 'conectado',
-                    'timestamp': current_time.isoformat(),
-                    'bateria': random.randint(20, 100)
-                }
-                
-            if processed_data:
-                device_data = {
-                    'device_address': device_address,
-                    'name': device_info.name,
-                    'type': device_info.device_type,
-                    'data': processed_data,
-                    'timestamp': current_time.isoformat(),
-                    'rssi': device_info.rssi
-                }
-                
-                self.device_data[device_address] = device_data
-                device_info.last_data = processed_data
-                
-                # Log específico para dados importantes
-                if device_info.device_type == 'balanca':
-                    self.log_message(f"⚖️ Peso registrado: {processed_data['peso']} kg", "INFO", device_address)
-                elif device_info.device_type == 'bastao' and 'animal_id' in processed_data:
-                    self.log_message(f"🐮 Animal identificado: {processed_data['animal_id']}", "INFO", device_address)
-                elif device_info.device_type == 'termometro':
-                    status_emoji = "🌡️" if processed_data['status'] == 'normal' else "🚨"
-                    self.log_message(f"{status_emoji} Temperatura: {processed_data['temperatura']}°C", 
-                                   "WARNING" if processed_data['status'] == 'alerta' else "INFO", device_address)
-                
-                self.send_data_to_web(device_data)
-                
-        except Exception as e:
-            self.log_message(f"Erro ao simular dados do dispositivo {device_address}: {e}", "ERROR")
-            
     def connect_single_device(self, device_address):
         """Conecta um dispositivo específico"""
+        if device_address not in self.valid_mac_addresses:
+            self.log_message(f"❌ Tentativa de conexão negada: {device_address} não está na lista válida", "WARNING")
+            return False
+            
         def connect():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -552,12 +354,12 @@ class BluetoothWebManager:
         
     def disconnect_single_device(self, device_address):
         """Desconecta um dispositivo específico"""
-        if device_address in self.connected_devices:
-            self.connected_devices[device_address].connected = False
-            self.connected_devices[device_address].connection_attempts = 0
+        if device_address in self.detected_devices:
+            self.detected_devices[device_address].connected = False
+            self.detected_devices[device_address].connection_attempts = 0
             if device_address in self.device_data:
                 del self.device_data[device_address]
-            self.log_message(f"🔌 Dispositivo {self.connected_devices[device_address].name} desconectado", "INFO")
+            self.log_message(f"🔌 Dispositivo {device_address} desconectado", "INFO")
             if self.socketio:
                 try:
                     self.socketio.emit('device_disconnected', {'device_address': device_address})
@@ -566,16 +368,17 @@ class BluetoothWebManager:
             
     async def connect_device(self, device_address):
         try:
-            device_info = self.connected_devices.get(device_address)
+            device_info = self.detected_devices.get(device_address)
             if not device_info:
+                self.log_message(f"❌ Dispositivo {device_address} não foi detectado ainda", "WARNING")
                 return False
                 
             if device_info.connection_attempts >= self.config['max_connection_attempts']:
-                self.log_message(f"❌ Máximo de tentativas de conexão atingido para {device_info.name}", "WARNING")
+                self.log_message(f"❌ Máximo de tentativas de conexão atingido para {device_address}", "WARNING")
                 return False
                 
             device_info.connection_attempts += 1
-            self.log_message(f"🔗 Tentativa {device_info.connection_attempts}: Conectando ao {device_info.name}")
+            self.log_message(f"🔗 Tentativa {device_info.connection_attempts}: Conectando ao {device_address}")
             
             self.is_connecting = True
             if self.socketio:
@@ -589,11 +392,10 @@ class BluetoothWebManager:
                     if client.is_connected:
                         device_info.connected = True
                         device_info.connection_attempts = 0
-                        self.log_message(f"✅ Conectado ao dispositivo: {device_info.name}")
+                        self.log_message(f"✅ Conectado ao dispositivo: {device_address}")
                         
                         # Simular leitura inicial de dados
                         await asyncio.sleep(1)
-                        self.simulate_device_data(device_address)
                         
                         if self.socketio:
                             try:
@@ -607,9 +409,9 @@ class BluetoothWebManager:
                         return True
                         
             except asyncio.TimeoutError:
-                self.log_message(f"⏰ Timeout ao conectar com {device_info.name}", "WARNING")
+                self.log_message(f"⏰ Timeout ao conectar com {device_address}", "WARNING")
             except Exception as e:
-                self.log_message(f"❌ Erro ao conectar com {device_info.name}: {e}", "ERROR")
+                self.log_message(f"❌ Erro ao conectar com {device_address}: {e}", "ERROR")
                 
         except Exception as e:
             self.log_message(f"❌ Erro geral na conexão com {device_address}: {e}", "ERROR")
@@ -629,14 +431,14 @@ class BluetoothWebManager:
             asyncio.set_event_loop(loop)
             
             tasks = []
-            disconnected_devices = [addr for addr, device in self.connected_devices.items() 
+            disconnected_devices = [addr for addr, device in self.detected_devices.items() 
                                   if not device.connected]
             
             if not disconnected_devices:
-                self.log_message("ℹ️ Todos os dispositivos já estão conectados")
+                self.log_message("ℹ️ Todos os dispositivos válidos já estão conectados")
                 return
                 
-            self.log_message(f"🔗 Conectando {len(disconnected_devices)} dispositivos...")
+            self.log_message(f"🔗 Conectando {len(disconnected_devices)} dispositivos válidos...")
             
             for device_address in disconnected_devices:
                 task = self.connect_device(device_address)
@@ -656,7 +458,7 @@ class BluetoothWebManager:
         
     def disconnect_all_devices(self):
         disconnected_count = 0
-        for device_address, device in self.connected_devices.items():
+        for device_address, device in self.detected_devices.items():
             if device.connected:
                 device.connected = False
                 device.connection_attempts = 0
@@ -674,35 +476,26 @@ class BluetoothWebManager:
         
     def request_device_data(self, device_address):
         """Força atualização de dados de um dispositivo específico"""
-        if device_address in self.connected_devices and self.connected_devices[device_address].connected:
-            self.simulate_device_data(device_address)
-            self.log_message(f"📊 Dados atualizados para {self.connected_devices[device_address].name}")
+        if device_address in self.detected_devices and self.detected_devices[device_address].connected:
+            self.log_message(f"📊 Dados solicitados para {device_address}")
         
     def run(self):
         self.start_time = datetime.now()
-        self.log_message("🚀 Sistema de monitoramento Bluetooth iniciado")
-        self.start_socket_server()
+        self.log_message("🚀 Sistema Bluetooth com Whitelist iniciado")
+        self.log_message(f"🎯 Lista de endereços MAC válidos: {self.valid_mac_addresses}")
         
         # Handler para shutdown graceful
         def signal_handler(sig, frame):
             self.log_message("🛑 Encerrando sistema...")
             self.is_scanning = False
-            if self.socket_server:
-                self.socket_server.close()
-            for client in self.clients:
-                try:
-                    client.close()
-                except:
-                    pass
             sys.exit(0)
             
         signal.signal(signal.SIGINT, signal_handler)
         
-        print(f"\n🎉 Sistema Bluetooth para Manejo Animal iniciado com sucesso!")
+        print(f"\n🎉 Sistema Bluetooth com Whitelist iniciado!")
         print(f"📱 Interface Web: http://localhost:{self.config['web_port']}")
-        print(f"🔌 Socket Server: localhost:{self.config['socket_port']}")
-        print(f"📋 Logs em tempo real disponíveis na interface web")
-        print(f"📊 Atualização automática de dados a cada {self.config['data_update_interval']}s")
+        print(f"🎯 {len(self.valid_mac_addresses)} endereços MAC válidos configurados")
+        print(f"📋 Endereços válidos: {', '.join(self.valid_mac_addresses)}")
         print(f"⚠️  Use Ctrl+C para parar o sistema\n")
         
         # Iniciar servidor web
@@ -712,14 +505,14 @@ class BluetoothWebManager:
                          debug=False,
                          allow_unsafe_werkzeug=True)
 
-# Template da interface web atualizada
+# Template da interface web com whitelist
 WEB_INTERFACE_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Bluetooth - Manejo Animal</title>
+    <title>Sistema Bluetooth - Dispositivos Autorizados</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -838,6 +631,28 @@ WEB_INTERFACE_TEMPLATE = '''
             padding: 8px 15px;
             font-size: 12px;
         }
+        .valid-addresses {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border-left: 4px solid #28a745;
+        }
+        .address-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .address-tag {
+            background: #667eea;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            font-weight: bold;
+        }
         .logs { 
             background: #1a1a1a; 
             color: #e0e0e0; 
@@ -853,7 +668,6 @@ WEB_INTERFACE_TEMPLATE = '''
             margin-bottom: 8px; 
             padding: 5px 10px;
             border-radius: 4px;
-            transition: background-color 0.3s ease;
         }
         .log-entry.new-log {
             background-color: rgba(102, 126, 234, 0.2);
@@ -869,88 +683,11 @@ WEB_INTERFACE_TEMPLATE = '''
         .log-level-ERROR { color: #e74c3c; }
         .status-connected { color: #28a745; font-weight: bold; }
         .status-disconnected { color: #dc3545; font-weight: bold; }
-        .status-connecting { color: #ffc107; font-weight: bold; }
-        .data-display { 
-            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%); 
-            padding: 20px; 
-            border-radius: 12px; 
-            margin: 15px 0; 
-            border: 1px solid #e0e0e0;
-        }
-        .weight-display { 
-            font-size: 2.5em; 
-            color: #1976d2; 
-            text-align: center; 
-            font-weight: bold;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-        }
-        .animal-display {
-            font-size: 1.8em;
-            color: #f57c00;
+        .empty-state {
             text-align: center;
-            font-weight: bold;
-        }
-        .temperature-display {
-            font-size: 2em;
-            text-align: center;
-            font-weight: bold;
-        }
-        .temp-normal { color: #4caf50; }
-        .temp-alert { color: #f44336; }
-        .battery-indicator {
-            display: inline-block;
-            width: 60px;
-            height: 20px;
-            border: 2px solid #ccc;
-            border-radius: 3px;
-            position: relative;
-            margin-left: 5px;
-        }
-        .battery-level {
-            height: 100%;
-            border-radius: 1px;
-            transition: all 0.3s ease;
-        }
-        .battery-high { background: #4caf50; }
-        .battery-medium { background: #ff9800; }
-        .battery-low { background: #f44336; }
-        .rssi-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-        }
-        .signal-bars {
-            display: flex;
-            align-items: end;
-            gap: 2px;
-        }
-        .signal-bar {
-            width: 3px;
-            background: #ccc;
-            border-radius: 1px;
-        }
-        .signal-bar.active { background: #4caf50; }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
-        }
-        .stat-item {
-            text-align: center;
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 8px;
-        }
-        .stat-value {
-            font-size: 1.5em;
-            font-weight: bold;
-            color: #667eea;
-        }
-        .stat-label {
-            font-size: 0.9em;
+            padding: 40px;
             color: #666;
-            margin-top: 5px;
+            font-style: italic;
         }
         .auto-update {
             position: fixed;
@@ -980,15 +717,19 @@ WEB_INTERFACE_TEMPLATE = '''
     
     <div class="container">
         <div class="header">
-            <h1>🐄 Sistema Bluetooth - Manejo Animal</h1>
+            <h1>🛡️ Sistema Bluetooth - Dispositivos Autorizados</h1>
             <div class="status-bar">
                 <div class="status-item">
                     <div class="status-label">Status Scan</div>
                     <div id="scan-status" class="status-value status-disconnected">Parado</div>
                 </div>
                 <div class="status-item">
-                    <div class="status-label">Dispositivos</div>
-                    <div id="device-count" class="status-value">0</div>
+                    <div class="status-label">MACs Válidos</div>
+                    <div id="valid-count" class="status-value">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Detectados</div>
+                    <div id="detected-count" class="status-value">0</div>
                 </div>
                 <div class="status-item">
                     <div class="status-label">Conectados</div>
@@ -997,10 +738,6 @@ WEB_INTERFACE_TEMPLATE = '''
                 <div class="status-item">
                     <div class="status-label">Última Atualização</div>
                     <div id="last-update" class="status-value">--:--:--</div>
-                </div>
-                <div class="status-item">
-                    <div class="status-label">Uptime</div>
-                    <div id="uptime" class="status-value">--</div>
                 </div>
             </div>
         </div>
@@ -1024,43 +761,24 @@ WEB_INTERFACE_TEMPLATE = '''
         </div>
         
         <div class="card">
+            <h2>✅ Endereços MAC Autorizados</h2>
+            <div id="valid-addresses" class="valid-addresses">
+                <strong>Lista de dispositivos autorizados:</strong>
+                <div id="address-list" class="address-list">
+                    <!-- Endereços serão inseridos aqui -->
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
             <h2>📱 Dispositivos Detectados</h2>
             <div id="devices-container" class="devices-grid">
-                <div class="device-card">Nenhum dispositivo detectado ainda...</div>
+                <div class="empty-state">Nenhum dispositivo autorizado detectado ainda...</div>
             </div>
         </div>
         
         <div class="card">
-            <h2>📊 Dados dos Dispositivos</h2>
-            <div id="data-container">
-                <p>Aguardando dados dos dispositivos...</p>
-            </div>
-        </div>
-        
-        <div class="card">
-            <h2>📈 Estatísticas do Sistema</h2>
-            <div id="stats-container" class="stats-grid">
-                <div class="stat-item">
-                    <div class="stat-value" id="stat-total">0</div>
-                    <div class="stat-label">Total Dispositivos</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value" id="stat-connected">0</div>
-                    <div class="stat-label">Conectados</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value" id="stat-data">0</div>
-                    <div class="stat-label">Pontos de Dados</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value" id="stat-logs">0</div>
-                    <div class="stat-label">Logs Recentes</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="card">
-            <h2>📋 Logs do Sistema em Tempo Real</h2>
+            <h2>📋 Logs do Sistema</h2>
             <div id="logs-container" class="logs"></div>
         </div>
     </div>
@@ -1069,6 +787,7 @@ WEB_INTERFACE_TEMPLATE = '''
         const socket = io();
         let isScanning = false;
         let isConnecting = false;
+        let validMacAddresses = [];
         
         socket.on('connect', function() {
             console.log('Conectado ao servidor');
@@ -1085,21 +804,16 @@ WEB_INTERFACE_TEMPLATE = '''
             console.log('Dados iniciais recebidos:', data);
             updateScanStatus(data.is_scanning);
             updateConnectingStatus(data.is_connecting);
-            updateDevicesDisplay(data.connected_devices);
-            updateDataDisplay(data.device_data);
+            updateValidAddresses(data.valid_mac_addresses || []);
+            updateDevicesDisplay(data.detected_devices);
             updateStats(data.stats);
             data.logs.forEach(log => addLogEntry(log, false));
             updateLastUpdate();
         });
         
         socket.on('devices_update', function(data) {
-            updateDevicesDisplay(data.connected_devices);
+            updateDevicesDisplay(data.detected_devices);
             if (data.stats) updateStats(data.stats);
-            updateLastUpdate();
-        });
-        
-        socket.on('device_data_update', function(data) {
-            updateSingleDeviceData(data);
             updateLastUpdate();
         });
         
@@ -1123,18 +837,6 @@ WEB_INTERFACE_TEMPLATE = '''
                 timestamp: new Date().toLocaleTimeString(),
                 level: 'INFO',
                 message: `✅ ${data.device_name} conectado com sucesso`
-            }, true);
-        });
-        
-        socket.on('device_disconnected', function(data) {
-            removeDeviceData(data.device_address);
-        });
-        
-        socket.on('all_devices_disconnected', function(data) {
-            addLogEntry({
-                timestamp: new Date().toLocaleTimeString(),
-                level: 'INFO',
-                message: `🔌 ${data.disconnected_count} dispositivos desconectados`
             }, true);
         });
         
@@ -1181,6 +883,65 @@ WEB_INTERFACE_TEMPLATE = '''
             }
         }
         
+        function updateValidAddresses(addresses) {
+            validMacAddresses = addresses;
+            const validCount = document.getElementById('valid-count');
+            const addressList = document.getElementById('address-list');
+            
+            validCount.textContent = addresses.length;
+            
+            if (addresses.length === 0) {
+                addressList.innerHTML = '<span style="color: #666; font-style: italic;">Nenhum endereço MAC configurado</span>';
+                return;
+            }
+            
+            addressList.innerHTML = addresses.map(address => 
+                `<span class="address-tag">${address}</span>`
+            ).join('');
+        }
+        
+        function updateDevicesDisplay(devices) {
+            const container = document.getElementById('devices-container');
+            const detectedCount = document.getElementById('detected-count');
+            const connectedCount = document.getElementById('connected-count');
+            
+            if (!devices || Object.keys(devices).length === 0) {
+                container.innerHTML = '<div class="empty-state">Nenhum dispositivo autorizado detectado ainda...</div>';
+                detectedCount.textContent = '0';
+                connectedCount.textContent = '0';
+                return;
+            }
+            
+            const connected = Object.values(devices).filter(d => d.connected).length;
+            detectedCount.textContent = Object.keys(devices).length;
+            connectedCount.textContent = connected;
+            
+            container.innerHTML = Object.values(devices).map(device => {
+                return `
+                    <div class="device-card ${device.connected ? 'device-connected' : 'device-disconnected'}" 
+                         data-device="${device.address}">
+                        <h4>🛡️ ${device.name}</h4>
+                        <div class="device-info">
+                            <div><strong>Endereço:</strong> ${device.address}</div>
+                            <div><strong>Status:</strong> 
+                                <span class="${device.connected ? 'status-connected' : 'status-disconnected'}">
+                                    ${device.connected ? 'Conectado' : 'Desconectado'}
+                                </span>
+                            </div>
+                            <div><strong>RSSI:</strong> ${device.rssi || '--'} dBm</div>
+                            <div><strong>Última visão:</strong> ${new Date(device.last_seen).toLocaleTimeString()}</div>
+                        </div>
+                        <div class="device-actions">
+                            ${!device.connected ? 
+                                `<button class="btn btn-success btn-connect" onclick="connectDevice('${device.address}')">🔗 Conectar</button>` :
+                                `<button class="btn btn-danger" onclick="disconnectDevice('${device.address}')">🔌 Desconectar</button>`
+                            }
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
         function updateDeviceConnectingStatus(deviceAddress, connecting) {
             const deviceCard = document.querySelector(`[data-device="${deviceAddress}"]`);
             if (deviceCard) {
@@ -1197,175 +958,9 @@ WEB_INTERFACE_TEMPLATE = '''
             }
         }
         
-        function getBatteryHTML(level) {
-            if (!level) return '';
-            const batteryClass = level > 60 ? 'battery-high' : level > 30 ? 'battery-medium' : 'battery-low';
-            return `
-                <div class="battery-indicator">
-                    <div class="battery-level ${batteryClass}" style="width: ${level}%"></div>
-                </div>
-                <span>${level}%</span>
-            `;
-        }
-        
-        function getRSSIHTML(rssi) {
-            if (!rssi) return '<span>-- dBm</span>';
-            
-            const strength = Math.min(4, Math.max(0, Math.floor((rssi + 100) / 15)));
-            let bars = '';
-            for (let i = 1; i <= 4; i++) {
-                const height = i * 3 + 2;
-                const active = i <= strength ? 'active' : '';
-                bars += `<div class="signal-bar ${active}" style="height: ${height}px"></div>`;
-            }
-            
-            return `
-                <div class="rssi-indicator">
-                    <div class="signal-bars">${bars}</div>
-                    <span>${rssi} dBm</span>
-                </div>
-            `;
-        }
-        
-        function updateDevicesDisplay(devices) {
-            const container = document.getElementById('devices-container');
-            const deviceCount = document.getElementById('device-count');
-            const connectedCount = document.getElementById('connected-count');
-            
-            if (Object.keys(devices).length === 0) {
-                container.innerHTML = '<div class="device-card">Nenhum dispositivo detectado ainda...</div>';
-                deviceCount.textContent = '0';
-                connectedCount.textContent = '0';
-                return;
-            }
-            
-            const connected = Object.values(devices).filter(d => d.connected).length;
-            deviceCount.textContent = Object.keys(devices).length;
-            connectedCount.textContent = connected;
-            
-            container.innerHTML = Object.values(devices).map(device => {
-                const typeEmoji = {
-                    'balanca': '⚖️',
-                    'bastao': '📡',
-                    'termometro': '🌡️',
-                    'desconhecido': '❓'
-                }[device.device_type] || '📱';
-                
-                const battery = device.last_data && device.last_data.bateria ? 
-                    getBatteryHTML(device.last_data.bateria) : '';
-                const rssi = getRSSIHTML(device.rssi);
-                
-                return `
-                    <div class="device-card ${device.connected ? 'device-connected' : 'device-disconnected'}" 
-                         data-device="${device.address}">
-                        <h4>${typeEmoji} ${device.name}</h4>
-                        <div class="device-info">
-                            <div><strong>Tipo:</strong> ${device.device_type}</div>
-                            <div><strong>Status:</strong> 
-                                <span class="${device.connected ? 'status-connected' : 'status-disconnected'}">
-                                    ${device.connected ? 'Conectado' : 'Desconectado'}
-                                </span>
-                            </div>
-                            <div><strong>Endereço:</strong> ${device.address}</div>
-                            <div><strong>Sinal:</strong> ${rssi}</div>
-                            <div><strong>Última visão:</strong> ${new Date(device.last_seen).toLocaleTimeString()}</div>
-                            <div><strong>Bateria:</strong> ${battery || 'N/A'}</div>
-                        </div>
-                        <div class="device-actions">
-                            ${!device.connected ? 
-                                `<button class="btn btn-success btn-connect" onclick="connectDevice('${device.address}')">🔗 Conectar</button>` :
-                                `<button class="btn btn-danger" onclick="disconnectDevice('${device.address}')">🔌 Desconectar</button>`
-                            }
-                            <button class="btn" onclick="requestDeviceData('${device.address}')">📊 Atualizar</button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-        
-        function updateDataDisplay(data) {
-            const container = document.getElementById('data-container');
-            let html = '';
-            
-            Object.values(data).forEach(device => {
-                if (device.data) {
-                    html += `<div class="data-display">
-                        <h4>${getDeviceEmoji(device.type)} ${device.name} (${device.type})</h4>`;
-                    
-                    if (device.type === 'balanca' && device.data.peso) {
-                        html += `
-                            <div class="weight-display">${device.data.peso} ${device.data.unidade}</div>
-                            <div style="text-align: center; margin-top: 10px;">
-                                <small>Estabilidade: ${device.data.estabilidade}</small>
-                            </div>
-                        `;
-                    } else if (device.type === 'bastao' && device.data.animal_id) {
-                        html += `
-                            <div class="animal-display">🐮 Animal: ${device.data.animal_id}</div>
-                            <div style="text-align: center; margin-top: 10px;">
-                                <small>Força do sinal: ${device.data.signal_strength}%</small>
-                            </div>
-                        `;
-                    } else if (device.type === 'termometro' && device.data.temperatura) {
-                        const tempClass = device.data.status === 'normal' ? 'temp-normal' : 'temp-alert';
-                        html += `
-                            <div class="temperature-display ${tempClass}">
-                                ${device.data.status === 'normal' ? '🌡️' : '🚨'} 
-                                ${device.data.temperatura} ${device.data.unidade}
-                            </div>
-                            <div style="text-align: center; margin-top: 10px;">
-                                <small>Status: ${device.data.status}</small>
-                            </div>
-                        `;
-                    } else {
-                        html += `<pre style="background: #f0f0f0; padding: 10px; border-radius: 5px;">${JSON.stringify(device.data, null, 2)}</pre>`;
-                    }
-                    
-                    html += `
-                        <div style="text-align: center; margin-top: 15px;">
-                            <small>📅 ${new Date(device.timestamp).toLocaleString()}</small>
-                            ${device.rssi ? `<br><small>📶 RSSI: ${device.rssi} dBm</small>` : ''}
-                        </div>
-                    </div>`;
-                }
-            });
-            
-            container.innerHTML = html || '<p>Aguardando dados dos dispositivos...</p>';
-        }
-        
-        function updateSingleDeviceData(deviceData) {
-            // Atualizar apenas um dispositivo específico
-            const existingData = {};
-            existingData[deviceData.device_address] = deviceData;
-            updateDataDisplay(existingData);
-        }
-        
-        function removeDeviceData(deviceAddress) {
-            const dataDisplay = document.querySelector(`[data-device="${deviceAddress}"]`);
-            if (dataDisplay) {
-                dataDisplay.style.transition = 'opacity 0.3s ease';
-                dataDisplay.style.opacity = '0.5';
-            }
-        }
-        
         function updateStats(stats) {
             if (!stats) return;
-            
-            document.getElementById('stat-total').textContent = stats.total_devices || 0;
-            document.getElementById('stat-connected').textContent = stats.connected_devices || 0;
-            document.getElementById('stat-data').textContent = stats.data_points || 0;
-            document.getElementById('stat-logs').textContent = stats.recent_logs || 0;
-            document.getElementById('uptime').textContent = stats.uptime || '--';
-        }
-        
-        function getDeviceEmoji(type) {
-            const emojis = {
-                'balanca': '⚖️',
-                'bastao': '📡',
-                'termometro': '🌡️',
-                'desconhecido': '❓'
-            };
-            return emojis[type] || '📱';
+            // Stats já são atualizados em outras funções
         }
         
         function addLogEntry(log, animate = false) {
@@ -1464,18 +1059,14 @@ WEB_INTERFACE_TEMPLATE = '''
                 });
         }
         
-        function requestDeviceData(deviceAddress) {
-            socket.emit('request_device_data', { device_address: deviceAddress });
-        }
-        
         // Carregar status inicial
         fetch('/api/status')
             .then(response => response.json())
             .then(data => {
                 updateScanStatus(data.is_scanning);
                 updateConnectingStatus(data.is_connecting);
-                updateDevicesDisplay(data.connected_devices || {});
-                updateDataDisplay(data.device_data || {});
+                updateValidAddresses(data.valid_mac_addresses || []);
+                updateDevicesDisplay(data.detected_devices || {});
                 updateStats(data.stats);
                 data.logs.forEach(log => addLogEntry(log, false));
                 updateLastUpdate();
