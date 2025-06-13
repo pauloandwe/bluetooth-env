@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bluetooth Manager - Sistema Completo</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            min-height: 100vh; 
+            padding: 20px; 
+        }
+        .container { max-width: 1600px; margin: 0 auto; }
+        .header { 
+            background: rgba(255,255,255,0.95); 
+            border-radius: 15px; 
+            padding: 20px; 
+            margin-bottom: 20px; 
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        .status-bar { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            background: #f8f9fa; 
+            padding: 15px; 
+            border-radius: 10px; 
+            margin-top: 15px; 
+        }
+        .status-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .status-label { font-size: 0.8em; color: #666; margin-bottom: 5px; }
+        .status-value { font-weight: bold; font-size: 1.1em; }
+        .card { 
+            background: rgba(255,255,255,0.95); 
+            border-radius: 15px; 
+            padding: 25px; 
+            margin-bottom: 20px; 
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        .controls { 
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .btn { 
+            background: linear-gradient(45deg, #667eea, #764ba2); 
+            color: white; 
+            border: none; 
+            padding: 12px 20px; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-size: 14px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-weight: 500;
+        }
+        .btn:hover { 
+            opacity: 0.9; 
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .btn-danger { background: linear-gradient(45deg, #ff6b6b, #ee5a24); }
+        .btn-success { background: linear-gradient(45deg, #26de81, #20bf6b); }
+        .btn-warning { background: linear-gradient(45deg, #fed330, #f7931e); }
+        .btn-info { background: linear-gradient(45deg, #74b9ff, #0984e3); }
+        .btn-small { padding: 6px 12px; font-size: 12px; }
+        
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-radius: 10px 10px 0 0;
+            overflow: hidden;
+        }
+        .tab {
+            flex: 1;
+            padding: 15px 20px;
+            background: #e9ecef;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        .tab:hover { background: #dee2e6; }
+        .tab.active { 
+            background: white; 
+            color: #667eea;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+        }
+        .tab-content {
+            background: white;
+            border-radius: 0 0 10px 10px;
+            min-height: 400px;
+        }
+        .tab-pane {
+            display: none;
+            padding: 20px;
+        }
+        .tab-pane.active { display: block; }
+        
+        .devices-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); 
+            gap: 20px; 
+        }
+        .device-card { 
+            background: #f8f9fa; 
+            padding: 20px; 
+            border-radius: 12px; 
+            transition: all 0.3s ease;
+            border-left: 4px solid #dc3545;
+            position: relative;
+        }
+        .device-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+        }
+        .device-connected { border-left-color: #28a745; }
+        .device-authorized { border-left-color: #667eea; }
+        .device-card h4 {
+            margin-bottom: 10px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .device-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .badge-authorized { background: #667eea; color: white; }
+        .badge-connected { background: #28a745; color: white; }
+        .badge-system { background: #17a2b8; color: white; }
+        
+        .device-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 15px 0;
+            font-size: 0.9em;
+        }
+        .device-actions {
+            margin-top: 15px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .device-actions .btn {
+            flex: 1;
+            min-width: 100px;
+        }
+        
+        .valid-addresses {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border-left: 4px solid #28a745;
+        }
+        .address-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .address-tag {
+            background: #667eea;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .logs { 
+            background: #1a1a1a; 
+            color: #e0e0e0; 
+            padding: 20px; 
+            border-radius: 12px; 
+            height: 400px; 
+            overflow-y: auto; 
+            font-family: 'Consolas', monospace; 
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .log-entry { 
+            margin-bottom: 8px; 
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+        .log-entry.new-log {
+            background-color: rgba(102, 126, 234, 0.2);
+            animation: highlight 1s ease-out;
+        }
+        @keyframes highlight {
+            0% { background-color: rgba(102, 126, 234, 0.4); }
+            100% { background-color: transparent; }
+        }
+        .log-timestamp { color: #7f8c8d; }
+        .log-level-INFO { color: #3498db; }
+        .log-level-WARNING { color: #f39c12; }
+        .log-level-ERROR { color: #e74c3c; }
+        
+        .status-connected { color: #28a745; font-weight: bold; }
+        .status-disconnected { color: #dc3545; font-weight: bold; }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-style: italic;
+        }
+        .auto-update {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 1000;
+        }
+        .pulse {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .connected-system-devices {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .container { padding: 10px; }
+            .devices-grid { grid-template-columns: 1fr; }
+            .controls { grid-template-columns: 1fr; }
+            .status-bar { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="auto-update" id="auto-update">
+        🟢 Atualização automática ativa
+    </div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>🔧 Bluetooth Manager - Sistema Completo</h1>
+            <div class="status-bar">
+                <div class="status-item">
+                    <div class="status-label">Scan Autorizados</div>
+                    <div id="scan-status" class="status-value status-disconnected">Parado</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Scan Completo</div>
+                    <div id="scan-all-status" class="status-value status-disconnected">Parado</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">MACs Autorizados</div>
+                    <div id="valid-count" class="status-value">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Detectados</div>
+                    <div id="detected-count" class="status-value">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Todos Dispositivos</div>
+                    <div id="all-devices-count" class="status-value">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Conectados</div>
+                    <div id="connected-count" class="status-value">0</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn" onclick="startScan()" id="start-btn">
+                🔍 Scan Autorizados
+            </button>
+            <button class="btn btn-info" onclick="startScanAll()" id="start-all-btn">
+                🌐 Scan Completo
+            </button>
+            <button class="btn btn-danger" onclick="stopScan()" id="stop-btn">
+                ⏹️ Parar Scans
+            </button>
+            <button class="btn btn-success" onclick="connectAll()" id="connect-all-btn">
+                🔗 Conectar Autorizados
+            </button>
+            <button class="btn btn-warning" onclick="disconnectAll()" id="disconnect-all-btn">
+                🔌 Desconectar Todos
+            </button>
+            <button class="btn" onclick="clearLogs()">
+                🗑️ Limpar Logs
+            </button>
+        </div>
+        
+        <div class="card">
+            <h2>✅ Endereços MAC Autorizados</h2>
+            <div id="valid-addresses" class="valid-addresses">
+                <strong>Lista de dispositivos autorizados:</strong>
+                <div id="address-list" class="address-list">
+                    <!-- Endereços serão inseridos aqui -->
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div id="connected-system-info" class="connected-system-devices">
+                <h3>💻 Dispositivos Conectados ao Sistema</h3>
+                <div id="system-devices-list">
+                    <div class="empty-state">Carregando informações do sistema...</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="tabs">
+                <button class="tab active" onclick="showTab('authorized')">
+                    🛡️ Dispositivos Autorizados (<span id="tab-authorized-count">0</span>)
+                </button>
+                <button class="tab" onclick="showTab('all')">
+                    📱 Todos os Dispositivos (<span id="tab-all-count">0</span>)
+                </button>
+            </div>
+            <div class="tab-content">
+                <div id="tab-authorized" class="tab-pane active">
+                    <div id="authorized-devices-container" class="devices-grid">
+                        <div class="empty-state">Nenhum dispositivo autorizado detectado ainda...</div>
+                    </div>
+                </div>
+                <div id="tab-all" class="tab-pane">
+                    <div id="all-devices-container" class="devices-grid">
+                        <div class="empty-state">Inicie o scan completo para ver todos os dispositivos...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>📋 Logs do Sistema</h2>
+            <div id="logs-container" class="logs"></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let isScanning = false;
+        let isScanningAll = false;
+        let isConnecting = false;
+        let validMacAddresses = [];
+        let currentTab = 'authorized';
+        
+        socket.on('connect', function() {
+            console.log('Conectado ao servidor');
+            updateAutoUpdateStatus(true);
+        });
+        
+        socket.on('disconnect', function() {
+            console.log('Desconectado do servidor');
+            updateAutoUpdateStatus(false);
+        });
+        
+        socket.on('initial_data', function(data) {
+            console.log('Dados iniciais recebidos:', data);
+            updateScanStatus(data.is_scanning, data.is_scanning_all);
+            updateConnectingStatus(data.is_connecting);
+            updateValidAddresses(data.valid_mac_addresses || []);
+            updateDevicesDisplay(data.detected_devices, 'authorized');
+            updateDevicesDisplay(data.all_devices, 'all');
+            updateStats(data.stats);
+            updateSystemDevices(data.connected_system_devices || []);
+            data.logs.forEach(log => addLogEntry(log, false));
+        });
+        
+        socket.on('devices_update', function(data) {
+            updateDevicesDisplay(data.detected_devices, 'authorized');
+            if (data.stats) updateStats(data.stats);
+        });
+        
+        socket.on('all_devices_update', function(data) {
+            updateDevicesDisplay(data.all_devices, 'all');
+            if (data.stats) updateStats(data.stats);
+        });
+        
+        socket.on('log_update', function(log) {
+            addLogEntry(log, true);
+        });
+        
+        socket.on('scanning_status', function(data) {
+            updateScanStatus(data.is_scanning, isScanningAll);
+        });
+        
+        socket.on('scanning_all_status', function(data) {
+            updateScanStatus(isScanning, data.is_scanning);
+        });
+        
+        socket.on('connection_status', function(data) {
+            updateConnectingStatus(data.is_connecting);
+        });
+        
+        socket.on('device_connected', function(data) {
+            addLogEntry({
+                timestamp: new Date().toLocaleTimeString(),
+                level: 'INFO',
+                message: `✅ ${data.device_name} conectado com sucesso`
+            }, true);
+        });
+        
+        function showTab(tabName) {
+            currentTab = tabName;
+            
+            // Atualizar tabs
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+            
+            document.querySelector(`button[onclick="showTab('${tabName}')"]`).classList.add('active');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+        
+        function updateAutoUpdateStatus(connected) {
+            const indicator = document.getElementById('auto-update');
+            if (connected) {
+                indicator.innerHTML = '🟢 Atualização automática ativa';
+                indicator.classList.remove('pulse');
+            } else {
+                indicator.innerHTML = '🔴 Desconectado';
+                indicator.classList.add('pulse');
+            }
+        }
+        
+        function updateScanStatus(scanning, scanningAll) {
+            isScanning = scanning;
+            isScanningAll = scanningAll;
+            
+            const scanStatus = document.getElementById('scan-status');
+            const scanAllStatus = document.getElementById('scan-all-status');
+            const startBtn = document.getElementById('start-btn');
+            const startAllBtn = document.getElementById('start-all-btn');
+            const stopBtn = document.getElementById('stop-btn');
+            
+            // Status scan autorizados
+            if (scanning) {
+                scanStatus.textContent = 'Ativo';
+                scanStatus.className = 'status-value status-connected pulse';
+                startBtn.disabled = true;
+            } else {
+                scanStatus.textContent = 'Parado';
+                scanStatus.className = 'status-value status-disconnected';
+                startBtn.disabled = false;
+            }
+            
+            // Status scan completo
+            if (scanningAll) {
+                scanAllStatus.textContent = 'Ativo';
+                scanAllStatus.className = 'status-value status-connected pulse';
+                startAllBtn.disabled = true;
+            } else {
+                scanAllStatus.textContent = 'Parado';
+                scanAllStatus.className = 'status-value status-disconnected';
+                startAllBtn.disabled = false;
+            }
+            
+            // Botão parar
+            stopBtn.disabled = !scanning && !scanningAll;
+        }
+        
+        function updateConnectingStatus(connecting) {
+            isConnecting = connecting;
+            const connectAllBtn = document.getElementById('connect-all-btn');
+            
+            if (connecting) {
+                connectAllBtn.innerHTML = '⏳ Conectando...';
+                connectAllBtn.disabled = true;
+            } else {
+                connectAllBtn.innerHTML = '🔗 Conectar Autorizados';
+                connectAllBtn.disabled = false;
+            }
+        }
+        
+        function updateValidAddresses(addresses) {
+            validMacAddresses = addresses;
+            const validCount = document.getElementById('valid-count');
+            const addressList = document.getElementById('address-list');
+            
+            validCount.textContent = addresses.length;
+            
+            if (addresses.length === 0) {
+                addressList.innerHTML = '<span style="color: #666; font-style: italic;">Nenhum endereço MAC configurado</span>';
+                return;
+            }
+            
+            addressList.innerHTML = addresses.map(address => 
+                `<span class="address-tag">${address}</span>`
+            ).join('');
+        }
+        
+        function updateSystemDevices(devices) {
+            const container = document.getElementById('system-devices-list');
+            
+            if (!devices || devices.length === 0) {
+                container.innerHTML = '<div class="empty-state">Nenhum dispositivo Bluetooth conectado ao sistema</div>';
+                return;
+            }
+            
+            container.innerHTML = devices.map(device => `
+                <div style="display: inline-block; margin: 5px; padding: 8px 12px; background: #2196f3; color: white; border-radius: 15px; font-size: 12px;">
+                    💻 ${device.name}
+                </div>
+            `).join('');
+        }
+        
+        function updateDevicesDisplay(devices, type) {
+            const container = document.getElementById(`${type === 'authorized' ? 'authorized' : 'all'}-devices-container`);
+            const countElement = document.getElementById(`tab-${type === 'authorized' ? 'authorized' : 'all'}-count`);
+            
+            if (!devices || Object.keys(devices).length === 0) {
+                const emptyMsg = type === 'authorized' ? 
+                    'Nenhum dispositivo autorizado detectado ainda...' : 
+                    'Inicie o scan completo para ver todos os dispositivos...';
+                container.innerHTML = `<div class="empty-state">${emptyMsg}</div>`;
+                countElement.textContent = '0';
+                return;
+            }
+            
+            const devicesList = Object.values(devices);
+            countElement.textContent = devicesList.length;
+            
+            container.innerHTML = devicesList.map(device => {
+                const isAuthorized = device.is_authorized;
+                const badgeClass = device.connected ? 'badge-connected' : (isAuthorized ? 'badge-authorized' : '');
+                const badgeText = device.connected ? 'Conectado' : (isAuthorized ? 'Autorizado' : '');
+                
+                return `
+                    <div class="device-card ${device.connected ? 'device-connected' : ''} ${isAuthorized ? 'device-authorized' : ''}" 
+                         data-device="${device.address}">
+                        <h4>
+                            <span>${device.name}</span>
+                            ${badgeText ? `<span class="device-badge ${badgeClass}">${badgeText}</span>` : ''}
+                        </h4>
+                        <div class="device-info">
+                            <div><strong>Endereço:</strong> ${device.address}</div>
+                            <div><strong>Status:</strong> 
+                                <span class="${device.connected ? 'status-connected' : 'status-disconnected'}">
+                                    ${device.connected ? 'Conectado' : 'Desconectado'}
+                                </span>
+                            </div>
+                            <div><strong>RSSI:</strong> ${device.rssi || '--'} dBm</div>
+                            <div><strong>Última visão:</strong> ${new Date(device.last_seen).toLocaleTimeString()}</div>
+                        </div>
+                        <div class="device-actions">
+                            ${!device.connected ? 
+                                `<button class="btn btn-success btn-small btn-connect" onclick="connectDevice('${device.address}')">🔗 Conectar</button>` :
+                                `<button class="btn btn-danger btn-small" onclick="disconnectDevice('${device.address}')">🔌 Desconectar</button>`
+                            }
+                            ${!isAuthorized ? 
+                                `<button class="btn btn-info btn-small" onclick="addToWhitelist('${device.address}')">➕ Autorizar</button>` : ''
+                            }
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function updateStats(stats) {
+            if (!stats) return;
+            
+            document.getElementById('detected-count').textContent = stats.detected_devices || 0;
+            document.getElementById('all-devices-count').textContent = stats.all_devices_count || 0;
+            document.getElementById('connected-count').textContent = stats.connected_devices || 0;
+        }
+        
+        function addLogEntry(log, animate = false) {
+            const container = document.getElementById('logs-container');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${animate ? 'new-log' : ''}`;
+            
+            const levelClass = `log-level-${log.level}`;
+            const deviceInfo = log.device_address ? ` [${log.device_address.substr(-4)}]` : '';
+            
+            entry.innerHTML = `
+                <span class="log-timestamp">[${log.timestamp}]</span> 
+                <span class="${levelClass}">[${log.level}]</span>${deviceInfo} 
+                ${log.message}
+            `;
+            
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+            
+            if (animate) {
+                setTimeout(() => entry.classList.remove('new-log'), 1000);
+            }
+            
+            // Limitar número de logs
+            const maxLogs = 200;
+            while (container.children.length > maxLogs) {
+                container.removeChild(container.firstChild);
+            }
+        }
+        
+        // Funções de controle
+        function startScan() {
+            fetch('/api/start_scan', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => console.log(data.message));
+        }
+        
+        function startScanAll() {
+            fetch('/api/start_scan_all', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => console.log(data.message));
+        }
+        
+        function stopScan() {
+            fetch('/api/stop_scan', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => console.log(data.message));
+        }
+        
+        function connectDevice(deviceAddress) {
+            fetch(`/api/connect_device/${deviceAddress}`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => console.log(data.message));
+        }
+        
+        function disconnectDevice(deviceAddress) {
+            fetch(`/api/disconnect_device/${deviceAddress}`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => console.log(data.message));
+        }
+        
+        function connectAll() {
+            fetch('/api/connect_all', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => console.log(data.message));
+        }
+        
+        function disconnectAll() {
+            fetch('/api/disconnect_all', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => console.log(data.message));
+        }
+        
+        function clearLogs() {
+            fetch('/api/clear_logs', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('logs-container').innerHTML = '';
+                    }
+                });
+        }
+        
+        function addToWhitelist(deviceAddress) {
+            if (confirm(`Adicionar ${deviceAddress} à lista de dispositivos autorizados?`)) {
+                fetch(`/api/add_to_whitelist/${deviceAddress}`, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            addLogEntry({
+                                timestamp: new Date().toLocaleTimeString(),
+                                level: 'INFO',
+                                message: data.message
+                            }, true);
+                            // Recarregar dados
+                            loadInitialData();
+                        }
+                    });
+            }
+        }
+        
+        function loadInitialData() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    updateScanStatus(data.is_scanning, data.is_scanning_all);
+                    updateConnectingStatus(data.is_connecting);
+                    updateValidAddresses(data.valid_mac_addresses || []);
+                    updateDevicesDisplay(data.detected_devices || {}, 'authorized');
+                    updateDevicesDisplay(data.all_devices || {}, 'all');
+                    updateStats(data.stats);
+                    updateSystemDevices(data.connected_system_devices || []);
+                    
+                    // Carregar logs apenas na inicialização
+                    if (document.getElementById('logs-container').children.length === 0) {
+                        data.logs.forEach(log => addLogEntry(log, false));
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar dados iniciais:', error);
+                    addLogEntry({
+                        timestamp: new Date().toLocaleTimeString(),
+                        level: 'ERROR',
+                        message: 'Erro ao conectar com o servidor'
+                    }, true);
+                });
+        }
+        
+        // Carregar dados iniciais
+        loadInitialData();
+    </script>
+</body>
+</html>

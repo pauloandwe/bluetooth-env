@@ -1,14 +1,6 @@
-# Dependências para Sistema Bluetooth - Versão Web
-# Sem dependência do tkinter
-
-# Bluetooth e comunicação
-bleak>=0.20.2,<0.23.0
-requests>=2.25.0
-pyserial>=3.4
-
-# Interface Web
-flask>=2.0.0
+flask>=2.3.0
 flask-socketio>=5.0.0
-
-# Opcional para melhor performance
-eventlet>=0.33.0
+bleak>=0.19.0
+requests>=2.25.0
+python-socketio>=5.0.0
+eventlet>=0.30.0

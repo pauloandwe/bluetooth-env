@@ -1,10 +1,14 @@
 {
   "socket_port": 8888,
   "web_port": 5001,
-  "web_endpoint": "http://localhost:5001/api/bluetooth-data",
   "scan_interval": 5,
-  "known_devices": {
-    "bastao": ["Bast\u00e3o", "Stick", "Rod", "RFID"],
-    "balanca": ["Balan\u00e7a", "Scale", "Weight", "Peso"]
-  }
+  "data_update_interval": 2,
+  "connection_timeout": 10,
+  "max_connection_attempts": 3,
+  "valid_mac_addresses": [
+    "AA:BB:CC:DD:EE:FF",
+    "11:22:33:44:55:66",
+    "77:88:99:AA:BB:CC",
+    "2A328859-8CB4-994A-F780-440D72EF1A0E"
+  ]
 }
