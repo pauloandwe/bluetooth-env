@@ -6,9 +6,6 @@
   "connection_timeout": 10,
   "max_connection_attempts": 3,
   "valid_devices": [
-    {"address": "AA:BB:CC:DD:EE:FF", "name": "Device 1"},
-    {"address": "11:22:33:44:55:66", "name": "Device 2"},
-    {"address": "77:88:99:AA:BB:CC", "name": "Device 3"},
-    {"address": "2A328859-8CB4-994A-F780-440D72EF1A0E", "name": "Device 4"}
+    { "address": "2A328859-8CB4-994A-F780-440D72EF1A0E", "name": "Device 1" }
   ]
 }

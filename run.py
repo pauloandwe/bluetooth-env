@@ -22,7 +22,7 @@ def check_python_version():
 def check_dependencies():
     """Verifica se as dependências estão instaladas"""
     required_packages = [
-        'flask', 'flask_socketio', 'bleak', 'requests'
+        'flask', 'flask_socketio', 'bleak', 'requests', 'serial'
     ]
     
     missing_packages = []
@@ -146,14 +146,14 @@ def main():
     
     # Iniciar o sistema
     try:
-        from bluetooth_manager import BluetoothManager
+        from bluetooth_web_manager import BluetoothManager
         app = BluetoothManager()
         app.run()
     except KeyboardInterrupt:
         print("\n\n🛑 Sistema encerrado pelo usuário")
     except ImportError as e:
         print(f"\n❌ Erro ao importar módulo: {e}")
-        print("   Verifique se o arquivo bluetooth_manager.py existe")
+        print("   Verifique se o arquivo bluetooth_web_manager.py existe")
     except Exception as e:
         print(f"\n❌ Erro inesperado: {e}")
         print("   Verifique os logs para mais detalhes")

@@ -15,6 +15,8 @@ from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional
 import platform
 import subprocess
+import serial
+from serial.tools import list_ports
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -38,6 +40,12 @@ class LogEntry:
     message: str
     device_address: Optional[str] = None
 
+@dataclass
+class SerialPortInfo:
+    port: str
+    description: str
+    hwid: str
+
 class BluetoothManager:
     def __init__(self):
         # Lista de dispositivos autorizados contendo nome e endereço
@@ -57,6 +65,7 @@ class BluetoothManager:
         self.is_scanning_all = False
         self.is_connecting = False
         self.logs: List[LogEntry] = []
+        self.serial_conn = None
         self.socketio = None
         
         self.config = {
@@ -226,6 +235,35 @@ class BluetoothManager:
                 self.log_message(f"Dispositivo {device_address} adicionado à whitelist", "INFO")
                 return jsonify({'success': True, 'message': 'Dispositivo adicionado à whitelist'})
             return jsonify({'success': False, 'message': 'Dispositivo já está na whitelist'})
+
+        @self.app.route('/api/serial_ports')
+        def api_serial_ports():
+            ports = [asdict(p) for p in self.list_serial_ports()]
+            return jsonify({'ports': ports})
+
+        @self.app.route('/api/open_serial', methods=['POST'])
+        def api_open_serial():
+            data = request.json or {}
+            port = data.get('port')
+            baudrate = data.get('baudrate', 9600)
+            if not port:
+                return jsonify({'success': False, 'message': 'Porta não especificada'})
+            if self.open_serial_port(port, baudrate):
+                return jsonify({'success': True, 'message': f'Porta {port} aberta'})
+            return jsonify({'success': False, 'message': 'Erro ao abrir porta'})
+
+        @self.app.route('/api/close_serial', methods=['POST'])
+        def api_close_serial():
+            self.close_serial_port()
+            return jsonify({'success': True, 'message': 'Porta serial fechada'})
+
+        @self.app.route('/api/send_serial', methods=['POST'])
+        def api_send_serial():
+            data = request.json or {}
+            payload = data.get('data', '')
+            if self.send_serial_data(payload):
+                return jsonify({'success': True})
+            return jsonify({'success': False, 'message': 'Falha ao enviar dados'})
         
     def setup_socket_events(self):
         """Configura eventos do SocketIO"""
@@ -354,6 +392,56 @@ class BluetoothManager:
             'all_connected_devices': all_connected_count,
             'uptime': str(now - getattr(self, 'start_time', now)),
         }
+
+    def list_serial_ports(self) -> List[SerialPortInfo]:
+        """Retorna portas seriais disponíveis"""
+        ports = []
+        for p in list_ports.comports():
+            ports.append(SerialPortInfo(port=p.device,
+                                       description=p.description,
+                                       hwid=p.hwid))
+        return ports
+
+    def open_serial_port(self, port: str, baudrate: int = 9600, timeout: float = 1.0) -> bool:
+        """Abre uma conexão serial"""
+        try:
+            self.serial_conn = serial.Serial(port, baudrate=baudrate, timeout=timeout)
+            self.log_message(f"Porta serial {port} aberta", "INFO")
+            return True
+        except Exception as e:
+            self.log_message(f"Erro ao abrir porta serial {port}: {e}", "ERROR")
+            self.serial_conn = None
+            return False
+
+    def close_serial_port(self):
+        """Fecha a porta serial se aberta"""
+        if self.serial_conn:
+            try:
+                self.serial_conn.close()
+                self.log_message("Porta serial fechada", "INFO")
+            except Exception as e:
+                self.log_message(f"Erro ao fechar porta serial: {e}", "ERROR")
+        self.serial_conn = None
+
+    def send_serial_data(self, data: str) -> bool:
+        """Envia dados pela serial"""
+        if self.serial_conn and self.serial_conn.is_open:
+            try:
+                self.serial_conn.write(data.encode())
+                return True
+            except Exception as e:
+                self.log_message(f"Erro ao enviar dados pela serial: {e}", "ERROR")
+        return False
+
+    def read_serial_line(self) -> Optional[str]:
+        """Lê uma linha da serial"""
+        if self.serial_conn and self.serial_conn.is_open:
+            try:
+                line = self.serial_conn.readline().decode(errors='ignore').strip()
+                return line
+            except Exception as e:
+                self.log_message(f"Erro ao ler da serial: {e}", "ERROR")
+        return None
         
     async def scan_devices(self, authorized_only=True):
         """Escaneia dispositivos Bluetooth"""
