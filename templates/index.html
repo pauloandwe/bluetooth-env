@@ -383,7 +383,7 @@
         let isScanning = false;
         let isScanningAll = false;
         let isConnecting = false;
-        let validMacAddresses = [];
+        let validDevices = [];
         let currentTab = 'authorized';
         
         socket.on('connect', function() {
@@ -400,7 +400,7 @@
             console.log('Dados iniciais recebidos:', data);
             updateScanStatus(data.is_scanning, data.is_scanning_all);
             updateConnectingStatus(data.is_connecting);
-            updateValidAddresses(data.valid_mac_addresses || []);
+            updateValidAddresses(data.valid_devices || []);
             updateDevicesDisplay(data.detected_devices, 'authorized');
             updateDevicesDisplay(data.all_devices, 'all');
             updateStats(data.stats);
@@ -513,20 +513,20 @@
             }
         }
         
-        function updateValidAddresses(addresses) {
-            validMacAddresses = addresses;
+        function updateValidAddresses(devices) {
+            validDevices = devices;
             const validCount = document.getElementById('valid-count');
             const addressList = document.getElementById('address-list');
-            
-            validCount.textContent = addresses.length;
-            
-            if (addresses.length === 0) {
-                addressList.innerHTML = '<span style="color: #666; font-style: italic;">Nenhum endereço MAC configurado</span>';
+
+            validCount.textContent = devices.length;
+
+            if (devices.length === 0) {
+                addressList.innerHTML = '<span style="color: #666; font-style: italic;">Nenhum dispositivo autorizado</span>';
                 return;
             }
-            
-            addressList.innerHTML = addresses.map(address => 
-                `<span class="address-tag">${address}</span>`
+
+            addressList.innerHTML = devices.map(dev =>
+                `<span class="address-tag" title="${dev.address}">${dev.name} (${dev.address})</span>`
             ).join('');
         }
         
@@ -710,7 +710,7 @@
                 .then(data => {
                     updateScanStatus(data.is_scanning, data.is_scanning_all);
                     updateConnectingStatus(data.is_connecting);
-                    updateValidAddresses(data.valid_mac_addresses || []);
+                    updateValidAddresses(data.valid_devices || []);
                     updateDevicesDisplay(data.detected_devices || {}, 'authorized');
                     updateDevicesDisplay(data.all_devices || {}, 'all');
                     updateStats(data.stats);

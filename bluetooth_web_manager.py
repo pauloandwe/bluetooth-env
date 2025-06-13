@@ -40,12 +40,15 @@ class LogEntry:
 
 class BluetoothManager:
     def __init__(self):
-        self.valid_mac_addresses = [
-            "AA:BB:CC:DD:EE:FF",
-            "11:22:33:44:55:66", 
-            "77:88:99:AA:BB:CC",
-            "2A328859-8CB4-994A-F780-440D72EF1A0E",
+        # Lista de dispositivos autorizados contendo nome e endereço
+        self.valid_devices = [
+            {"address": "AA:BB:CC:DD:EE:FF", "name": "Device 1"},
+            {"address": "11:22:33:44:55:66", "name": "Device 2"},
+            {"address": "77:88:99:AA:BB:CC", "name": "Device 3"},
+            {"address": "2A328859-8CB4-994A-F780-440D72EF1A0E", "name": "Device 4"},
         ]
+        # Lista simples de MACs para verificações rápidas
+        self.update_valid_mac_addresses()
         
         self.detected_devices: Dict[str, DeviceInfo] = {}
         self.all_devices: Dict[str, DeviceInfo] = {}  # Todos os dispositivos encontrados
@@ -67,6 +70,10 @@ class BluetoothManager:
         
         self.setup_flask()
         self.load_config()
+
+    def update_valid_mac_addresses(self):
+        """Atualiza lista simples de endereços MAC a partir dos dispositivos válidos"""
+        self.valid_mac_addresses = [d["address"] for d in self.valid_devices]
         
     def load_config(self):
         """Carrega configurações do arquivo JSON"""
@@ -74,8 +81,13 @@ class BluetoothManager:
             with open('bluetooth_config.json', 'r') as f:
                 loaded_config = json.load(f)
                 self.config.update(loaded_config)
-                if 'valid_mac_addresses' in loaded_config:
-                    self.valid_mac_addresses = loaded_config['valid_mac_addresses']
+                if 'valid_devices' in loaded_config:
+                    self.valid_devices = loaded_config['valid_devices']
+                elif 'valid_mac_addresses' in loaded_config:
+                    self.valid_devices = [
+                        {"address": addr, "name": addr} for addr in loaded_config['valid_mac_addresses']
+                    ]
+                self.update_valid_mac_addresses()
                 self.log_message("Configurações carregadas com sucesso", "INFO")
         except FileNotFoundError:
             self.save_config()
@@ -87,7 +99,7 @@ class BluetoothManager:
         """Salva configurações no arquivo JSON"""
         try:
             config_to_save = self.config.copy()
-            config_to_save['valid_mac_addresses'] = self.valid_mac_addresses
+            config_to_save['valid_devices'] = self.valid_devices
             
             with open('bluetooth_config.json', 'w') as f:
                 json.dump(config_to_save, f, indent=2, ensure_ascii=False)
@@ -116,7 +128,7 @@ class BluetoothManager:
                 'is_scanning': self.is_scanning,
                 'is_scanning_all': self.is_scanning_all,
                 'is_connecting': self.is_connecting,
-                'valid_mac_addresses': self.valid_mac_addresses,
+                'valid_devices': self.valid_devices,
                 'detected_devices': {addr: asdict(device) for addr, device in self.detected_devices.items()},
                 'all_devices': {addr: asdict(device) for addr, device in self.all_devices.items()},
                 'device_data': self.device_data,
@@ -175,25 +187,42 @@ class BluetoothManager:
         @self.app.route('/api/update_valid_macs', methods=['POST'])
         def api_update_valid_macs():
             data = request.json
-            if 'mac_addresses' in data and isinstance(data['mac_addresses'], list):
-                self.valid_mac_addresses = data['mac_addresses']
+            if 'devices' in data and isinstance(data['devices'], list):
+                self.valid_devices = data['devices']
+                self.update_valid_mac_addresses()
                 self.save_config()
-                self.log_message(f"Lista de MACs válidos atualizada: {len(self.valid_mac_addresses)} endereços", "INFO")
-                return jsonify({'success': True, 'message': 'Lista de MACs válidos atualizada'})
+                self.log_message(
+                    f"Lista de dispositivos válidos atualizada: {len(self.valid_devices)} endereços",
+                    "INFO")
+                return jsonify({'success': True, 'message': 'Lista de dispositivos atualizada'})
+            elif 'mac_addresses' in data and isinstance(data['mac_addresses'], list):
+                # Suporte legado - apenas endereços
+                self.valid_devices = [{"address": addr, "name": addr} for addr in data['mac_addresses']]
+                self.update_valid_mac_addresses()
+                self.save_config()
+                return jsonify({'success': True, 'message': 'Lista atualizada'})
             return jsonify({'success': False, 'message': 'Formato inválido'})
             
         @self.app.route('/api/add_to_whitelist/<device_address>', methods=['POST'])
         def api_add_to_whitelist(device_address):
             if device_address not in self.valid_mac_addresses:
-                self.valid_mac_addresses.append(device_address)
+                device_name = None
+                if device_address in self.all_devices:
+                    device_name = self.all_devices[device_address].name
+                payload = request.json or {}
+                device_name = payload.get('name') or device_name or device_address
+
+                self.valid_devices.append({"address": device_address, "name": device_name})
+                self.update_valid_mac_addresses()
                 self.save_config()
-                
+
                 # Mover dispositivo para lista autorizada se existir
                 if device_address in self.all_devices:
                     device = self.all_devices[device_address]
                     device.is_authorized = True
+                    device.name = device_name
                     self.detected_devices[device_address] = device
-                    
+
                 self.log_message(f"Dispositivo {device_address} adicionado à whitelist", "INFO")
                 return jsonify({'success': True, 'message': 'Dispositivo adicionado à whitelist'})
             return jsonify({'success': False, 'message': 'Dispositivo já está na whitelist'})
@@ -208,7 +237,7 @@ class BluetoothManager:
                 'is_scanning': self.is_scanning,
                 'is_scanning_all': self.is_scanning_all,
                 'is_connecting': self.is_connecting,
-                'valid_mac_addresses': self.valid_mac_addresses,
+                'valid_devices': self.valid_devices,
                 'detected_devices': {addr: asdict(device) for addr, device in self.detected_devices.items()},
                 'all_devices': {addr: asdict(device) for addr, device in self.all_devices.items()},
                 'device_data': self.device_data,
@@ -318,7 +347,7 @@ class BluetoothManager:
         all_connected_count = sum(1 for device in self.all_devices.values() if device.connected)
         
         return {
-            'valid_addresses_count': len(self.valid_mac_addresses),
+            'valid_addresses_count': len(self.valid_devices),
             'detected_devices': len(self.detected_devices),
             'all_devices_count': len(self.all_devices),
             'connected_devices': connected_count,
@@ -340,14 +369,20 @@ class BluetoothManager:
                 
                 for device_address, (device, adv_data) in devices.items():
                     is_authorized = device_address in self.valid_mac_addresses
-                    
+                    stored_name = None
+                    if is_authorized:
+                        for d in self.valid_devices:
+                            if d['address'] == device_address:
+                                stored_name = d.get('name')
+                                break
+
                     # Filtrar por tipo de scan
                     if authorized_only and not is_authorized:
                         continue
-                        
+
                     device_info = DeviceInfo(
                         address=device_address,
-                        name=device.name or f"Dispositivo {device_address[-5:]}",
+                        name=stored_name or device.name or f"Dispositivo {device_address[-5:]}",
                         last_seen=current_time.isoformat(),
                         connected=False,
                         rssi=getattr(adv_data, 'rssi', None),
@@ -365,7 +400,8 @@ class BluetoothManager:
                         
                         status_icon = "✅" if is_authorized else "📱"
                         auth_text = "autorizado" if is_authorized else "detectado"
-                        self.log_message(f"{status_icon} Dispositivo {auth_text}: {device_address} ({device.name}) - RSSI: {device_info.rssi}")
+                        self.log_message(
+                            f"{status_icon} Dispositivo {auth_text}: {device_address} ({device_info.name}) - RSSI: {device_info.rssi}")
                     else:
                         # Atualizar informações
                         existing_device = target_dict[device_address]
@@ -591,7 +627,7 @@ class BluetoothManager:
         """Executa o sistema"""
         self.start_time = datetime.now()
         self.log_message("🚀 Sistema Bluetooth Manager iniciado")
-        self.log_message(f"🎯 {len(self.valid_mac_addresses)} endereços MAC autorizados configurados")
+        self.log_message(f"🎯 {len(self.valid_devices)} endereços MAC autorizados configurados")
         
         def signal_handler(sig, frame):
             self.log_message("🛑 Encerrando sistema...")
@@ -603,7 +639,7 @@ class BluetoothManager:
         
         print(f"\n🎉 Sistema Bluetooth Manager iniciado!")
         print(f"📱 Interface Web: http://localhost:{self.config['web_port']}")
-        print(f"🎯 {len(self.valid_mac_addresses)} endereços MAC autorizados")
+        print(f"🎯 {len(self.valid_devices)} endereços MAC autorizados")
         print(f"⚠️  Use Ctrl+C para parar o sistema\n")
         
         # Criar diretório templates se não existir

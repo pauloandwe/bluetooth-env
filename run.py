@@ -84,10 +84,10 @@ def check_config_file():
             "data_update_interval": 2,
             "connection_timeout": 10,
             "max_connection_attempts": 3,
-            "valid_mac_addresses": [
-                "AA:BB:CC:DD:EE:FF",
-                "11:22:33:44:55:66",
-                "77:88:99:AA:BB:CC"
+            "valid_devices": [
+                {"address": "AA:BB:CC:DD:EE:FF", "name": "Device 1"},
+                {"address": "11:22:33:44:55:66", "name": "Device 2"},
+                {"address": "77:88:99:AA:BB:CC", "name": "Device 3"}
             ]
         }
         
