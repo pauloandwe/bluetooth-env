@@ -4,6 +4,7 @@ import platform
 import subprocess
 from dataclasses import asdict
 from typing import List
+from datetime import datetime
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 from config import Config
@@ -22,6 +23,9 @@ class WebInterface:
         
         # Conectar device_service ao socketio
         self.device_service.set_socketio(self.socketio)
+        
+        # Configurar callback para dados do bastão
+        self.serial_handler.set_data_callback(self.handle_serial_data)
         
         self.setup_routes()
         self.setup_socket_events()
@@ -157,6 +161,16 @@ class WebInterface:
             if self.serial_handler.send_serial_data(payload):
                 return jsonify({'success': True})
             return jsonify({'success': False, 'message': 'Falha ao enviar dados'})
+        
+        @self.app.route('/api/start_serial_reading', methods=['POST'])
+        def api_start_serial_reading():
+            self.serial_handler.start_continuous_reading()
+            return jsonify({'success': True, 'message': 'Leitura contínua iniciada'})
+        
+        @self.app.route('/api/stop_serial_reading', methods=['POST'])
+        def api_stop_serial_reading():
+            self.serial_handler.stop_continuous_reading()
+            return jsonify({'success': True, 'message': 'Leitura contínua parada'})
     
     def setup_socket_events(self):
         @self.socketio.on('connect')
@@ -178,6 +192,14 @@ class WebInterface:
         @self.socketio.on('disconnect')
         def handle_disconnect():
             self.device_service.log_message('Cliente web desconectado', "INFO")
+    
+    def handle_serial_data(self, data):
+        """Callback para dados recebidos da serial"""
+        if self.socketio:
+            try:
+                self.socketio.emit('serial_data', {'data': data, 'timestamp': datetime.now().isoformat()})
+            except Exception as e:
+                self.device_service.log_message(f"Erro ao emitir dados serial: {e}", "ERROR")
     
     def get_connected_system_devices(self):
         connected_devices = []

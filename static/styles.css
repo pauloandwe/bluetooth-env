@@ -11,6 +11,82 @@ body {
     padding: 20px; 
 }
 
+/* Estilos para controles seriais */
+.serial-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.serial-ports {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.serial-ports label {
+    font-weight: bold;
+    color: #333;
+}
+
+.serial-ports select {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: white;
+}
+
+.serial-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 0.9em;
+}
+
+/* Estilos para dados seriais */
+.serial-data {
+    max-height: 400px;
+    overflow-y: auto;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 15px;
+    font-family: 'Courier New', monospace;
+}
+
+.serial-data-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.serial-data-item:last-child {
+    border-bottom: none;
+}
+
+.serial-data-content {
+    flex: 1;
+    background: #fff;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+    color: #333;
+}
+
+.serial-data-time {
+    font-size: 0.8em;
+    color: #666;
+    margin-left: 10px;
+}
+
 .container { 
     max-width: 1600px; 
     margin: 0 auto; 

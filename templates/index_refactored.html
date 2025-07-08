@@ -107,6 +107,29 @@
         </div>
         
         <div class="card">
+            <h2>📊 Dados do Bastão Serial</h2>
+            <div class="serial-controls">
+                <div class="serial-ports">
+                    <label for="serial-port">Porta Serial:</label>
+                    <select id="serial-port">
+                        <option value="">Selecione uma porta</option>
+                    </select>
+                    <button class="btn btn-small" onclick="loadSerialPorts()">🔄 Atualizar</button>
+                </div>
+                <div class="serial-actions">
+                    <button class="btn btn-small" onclick="openSerial()">📡 Conectar</button>
+                    <button class="btn btn-small" onclick="closeSerial()">🔌 Desconectar</button>
+                    <button class="btn btn-small" onclick="startReading()">▶️ Iniciar Leitura</button>
+                    <button class="btn btn-small" onclick="stopReading()">⏹️ Parar Leitura</button>
+                    <button class="btn btn-small" onclick="clearSerialData()">🗑️ Limpar</button>
+                </div>
+            </div>
+            <div id="serial-data-container" class="serial-data">
+                <div class="empty-state">Conecte o bastão e inicie a leitura para ver os dados...</div>
+            </div>
+        </div>
+        
+        <div class="card">
             <h2>📋 Logs do Sistema</h2>
             <div id="logs-container" class="logs"></div>
         </div>

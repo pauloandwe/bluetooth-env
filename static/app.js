@@ -49,6 +49,10 @@ class BluetoothApp {
             this.addLogEntry(log, true);
         });
         
+        this.socket.on('serial_data', (data) => {
+            this.addSerialData(data);
+        });
+        
         this.socket.on('scanning_status', (data) => {
             this.updateScanStatus(data.is_scanning, this.isScanningAll);
         });
@@ -86,6 +90,9 @@ class BluetoothApp {
         document.getElementById('connect-all-btn').addEventListener('click', () => this.connectAll());
         document.getElementById('disconnect-all-btn').addEventListener('click', () => this.disconnectAll());
         document.querySelector('button[onclick="clearLogs()"]').addEventListener('click', () => this.clearLogs());
+        
+        // Carregar portas seriais iniciais
+        this.loadSerialPorts();
     }
     
     showTab(tabName) {
@@ -382,6 +389,136 @@ class BluetoothApp {
             }, true);
         }
     }
+    
+    // Métodos para controle serial
+    async loadSerialPorts() {
+        try {
+            const data = await this.apiCall('/api/serial_ports');
+            const select = document.getElementById('serial-port');
+            select.innerHTML = '<option value="">Selecione uma porta</option>';
+            
+            if (data.ports && Array.isArray(data.ports)) {
+                data.ports.forEach(port => {
+                    const option = document.createElement('option');
+                    option.value = port.port;
+                    option.textContent = `${port.port} - ${port.description}`;
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Erro ao carregar portas seriais:', error);
+        }
+    }
+    
+    async openSerial() {
+        const port = document.getElementById('serial-port').value;
+        if (!port) {
+            alert('Selecione uma porta serial primeiro');
+            return;
+        }
+        
+        try {
+            const response = await this.apiCall('/api/open_serial', 'POST', {
+                port: port,
+                baudrate: 9600
+            });
+            
+            if (response.success) {
+                this.addLogEntry({
+                    timestamp: new Date().toLocaleTimeString(),
+                    level: 'INFO',
+                    message: `📡 Porta serial ${port} aberta`
+                }, true);
+            } else {
+                this.addLogEntry({
+                    timestamp: new Date().toLocaleTimeString(),
+                    level: 'ERROR',
+                    message: response.message || 'Erro ao abrir porta serial'
+                }, true);
+            }
+        } catch (error) {
+            console.error('Erro ao abrir porta serial:', error);
+        }
+    }
+    
+    async closeSerial() {
+        try {
+            const response = await this.apiCall('/api/close_serial', 'POST');
+            if (response.success) {
+                this.addLogEntry({
+                    timestamp: new Date().toLocaleTimeString(),
+                    level: 'INFO',
+                    message: '🔌 Porta serial fechada'
+                }, true);
+            }
+        } catch (error) {
+            console.error('Erro ao fechar porta serial:', error);
+        }
+    }
+    
+    async startReading() {
+        try {
+            const response = await this.apiCall('/api/start_serial_reading', 'POST');
+            if (response.success) {
+                this.addLogEntry({
+                    timestamp: new Date().toLocaleTimeString(),
+                    level: 'INFO',
+                    message: '▶️ Leitura contínua iniciada'
+                }, true);
+            }
+        } catch (error) {
+            console.error('Erro ao iniciar leitura:', error);
+        }
+    }
+    
+    async stopReading() {
+        try {
+            const response = await this.apiCall('/api/stop_serial_reading', 'POST');
+            if (response.success) {
+                this.addLogEntry({
+                    timestamp: new Date().toLocaleTimeString(),
+                    level: 'INFO',
+                    message: '⏹️ Leitura contínua parada'
+                }, true);
+            }
+        } catch (error) {
+            console.error('Erro ao parar leitura:', error);
+        }
+    }
+    
+    addSerialData(data) {
+        const container = document.getElementById('serial-data-container');
+        
+        // Remover mensagem vazia se existir
+        const emptyState = container.querySelector('.empty-state');
+        if (emptyState) {
+            emptyState.remove();
+        }
+        
+        // Criar elemento para dados
+        const dataElement = document.createElement('div');
+        dataElement.className = 'serial-data-item';
+        
+        const timestamp = new Date(data.timestamp).toLocaleTimeString();
+        dataElement.innerHTML = `
+            <div class="serial-data-content">${data.data}</div>
+            <div class="serial-data-time">${timestamp}</div>
+        `;
+        
+        // Adicionar no topo
+        container.insertBefore(dataElement, container.firstChild);
+        
+        // Limitar a 100 entradas
+        const items = container.querySelectorAll('.serial-data-item');
+        if (items.length > 100) {
+            items[items.length - 1].remove();
+        }
+    }
+    
+    clearSerialData() {
+        const container = document.getElementById('serial-data-container');
+        container.innerHTML = '<div class="empty-state">Conecte o bastão e inicie a leitura para ver os dados...</div>';
+    }
 }
 
 // Inicializar aplicação
@@ -429,4 +566,29 @@ function clearLogs() {
 
 function addToWhitelist(deviceAddress) {
     app.addToWhitelist(deviceAddress);
+}
+
+// Funções para controle serial
+function loadSerialPorts() {
+    app.loadSerialPorts();
+}
+
+function openSerial() {
+    app.openSerial();
+}
+
+function closeSerial() {
+    app.closeSerial();
+}
+
+function startReading() {
+    app.startReading();
+}
+
+function stopReading() {
+    app.stopReading();
+}
+
+function clearSerialData() {
+    app.clearSerialData();
 }

@@ -16,9 +16,14 @@ class SerialHandler:
     def __init__(self):
         self.serial_conn = None
         self.log_callback = None
+        self.data_callback = None
+        self.is_reading = False
     
     def set_log_callback(self, callback):
         self.log_callback = callback
+    
+    def set_data_callback(self, callback):
+        self.data_callback = callback
     
     def _log(self, message: str, level: str = "INFO"):
         if self.log_callback:
@@ -68,7 +73,39 @@ class SerialHandler:
         if self.serial_conn and self.serial_conn.is_open:
             try:
                 line = self.serial_conn.readline().decode(errors='ignore').strip()
+                if line and self.data_callback:
+                    self.data_callback(line)
                 return line
             except Exception as e:
                 self._log(f"Erro ao ler da serial: {e}", "ERROR")
         return None
+    
+    def start_continuous_reading(self):
+        import threading
+        if not self.is_reading and self.serial_conn and self.serial_conn.is_open:
+            self.is_reading = True
+            self._log("Iniciando leitura contínua da serial", "INFO")
+            
+            def read_loop():
+                while self.is_reading and self.serial_conn and self.serial_conn.is_open:
+                    try:
+                        if self.serial_conn.in_waiting > 0:
+                            line = self.serial_conn.readline().decode(errors='ignore').strip()
+                            if line:
+                                self._log(f"Dados lidos: {line}", "INFO")
+                                if self.data_callback:
+                                    self.data_callback(line)
+                    except Exception as e:
+                        self._log(f"Erro na leitura contínua: {e}", "ERROR")
+                        break
+                    import time
+                    time.sleep(0.1)
+                self.is_reading = False
+            
+            thread = threading.Thread(target=read_loop)
+            thread.daemon = True
+            thread.start()
+    
+    def stop_continuous_reading(self):
+        self.is_reading = False
+        self._log("Parando leitura contínua da serial", "INFO")
