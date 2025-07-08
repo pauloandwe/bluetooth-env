@@ -6,6 +6,21 @@
   "connection_timeout": 10,
   "max_connection_attempts": 3,
   "valid_devices": [
-    { "address": "2A328859-8CB4-994A-F780-440D72EF1A0E", "name": "Device 1" }
+    {
+      "address": "DE473C54-A63F-734C-3F67-064A2C6E1DC8",
+      "name": "Bastão 1"
+    },
+    {
+      "address": "11:22:33:44:55:66",
+      "name": "Device 2"
+    },
+    {
+      "address": "77:88:99:AA:BB:CC",
+      "name": "Device 3"
+    },
+    {
+      "address": "2A328859-8CB4-994A-F780-440D72EF1A0E",
+      "name": "Device 4"
+    }
   ]
 }
